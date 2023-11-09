@@ -1,0 +1,48 @@
+---
+title: "Tidy Tuesday: An Analysis of US House Election Results"
+author: "Barron Brothers"
+date: "8 Nov 2023"
+format: pdf
+editor: source
+---
+
+## Setup
+
+```{r load-pkgs}
+library(tidyverse)
+library(tidymodels)
+library(dplyr)
+library(knitr)
+```
+
+```{r load-data}
+library(tidytuesdayR)
+
+tt_load(2023, week = 45)
+```
+
+## EDA
+
+```{r who-won?}
+winning_party = house |>
+  group_by(year, state, district) |>
+  mutate(frac_votes = candidatevotes / totalvotes,
+         party = case_when(party == "DEMOCRAT" ~ "DEMOCRAT",
+                            party == "REPUBLICAN" ~ "REPUBLICAN",
+                            party != "DEMOCRAT" | party != "REPUBLICAN" ~ 
+                              "OTHER"),
+         party = factor(party, levels = c("DEMOCRAT", "OTHER", "REPUBLICAN"))) |>
+  filter(frac_votes == max(frac_votes))
+
+winning_party1 = winning_party |>
+  group_by(year) |>
+  count(party, .drop = FALSE)
+
+winning_party1 |>
+  group_by(year) |>
+  ggplot(aes(x = year, y = n, color = party)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values = c("blue", "darkgreen", "red"))
+```
+

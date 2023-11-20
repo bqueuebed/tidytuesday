@@ -8,22 +8,26 @@ editor: source
 
 ## Setup
 
-```{r load-pkgs}
+```{r load-pkgs, message = F}
 library(tidyverse)
 library(tidymodels)
 library(dplyr)
 library(knitr)
+library(sf)
+library(crosstable)
 ```
 
-```{r load-data}
+```{r load-data, message = F}
 library(tidytuesdayR)
 
-tt_load(2023, week = 45)
+tues_data = tt_load(2023, week = 45)
+house = tues_data$house
 ```
 
 ## EDA
 
 ```{r who-won?}
+#create party factors and determine the fraction of votes each candidate got
 winning_party = house |>
   group_by(year, state, district) |>
   mutate(frac_votes = candidatevotes / totalvotes,
@@ -31,18 +35,116 @@ winning_party = house |>
                             party == "REPUBLICAN" ~ "REPUBLICAN",
                             party != "DEMOCRAT" | party != "REPUBLICAN" ~ 
                               "OTHER"),
-         party = factor(party, levels = c("DEMOCRAT", "OTHER", "REPUBLICAN"))) |>
+         party = factor(party, 
+                        levels = c("DEMOCRAT", "OTHER", "REPUBLICAN"))) |>
+#filter for the candidate who got the highest percentage of votes for each year,
+# state, and district. In other words, this is the winning candidate, and their
+# party information is saved in the `party` column.
   filter(frac_votes == max(frac_votes))
 
+#Count the instances for each party
 winning_party1 = winning_party |>
   group_by(year) |>
   count(party, .drop = FALSE)
 
+#Plot the count
 winning_party1 |>
   group_by(year) |>
   ggplot(aes(x = year, y = n, color = party)) +
   geom_point() +
   geom_line() +
-  scale_color_manual(values = c("blue", "darkgreen", "red"))
+  scale_color_manual(values = c("blue", "darkgreen", "red")) +
+  labs(
+    x = "Year",
+    y = "Number of Counties Won",
+    title = "House Elections Historical Distribution, Compiled by County"
+  )
+```
+
+Let's see how the data is spread spatially over time for each election period (2 years) by county. For simplicity, only Democrat and Republican winners will be separated from "Other" winners.
+
+```{r prep}
+#load usa map and save as sf object
+usa = st_as_sf(maps::map("state", fill = TRUE, plot = FALSE))
+
+#mutate state column to all lowercase variables so join works
+winning_party = winning_party |>
+  mutate(state = tolower(state))
+
+#filter out alaska, hawaii, and dc; filter out `party = "Other"`.
+winning_party = winning_party |>
+  filter(state != "alaska", state != "hawaii", state != "district of columbia",
+         party != "OTHER", )
+
+#count winners by state, year, and party
+winning_party_count = winning_party |>
+  group_by(year, state, party) |>
+  count()
+
+#count districts by state and divide by number of years to obtain average
+
+district_count = winning_party |>
+  group_by(state) |>
+  count()
+
+district_count = district_count |>
+  mutate(n = n/24)
+
+#mutate to show % of districts republcians won
+winning_party_count = winning_party_count |>
+  mutate(rep_districts = if_else(party == "REPUBLICAN", n, 0),
+         dem_districts = if_else(party == "DEMOCRAT", n, 0)) |>
+  ungroup()
+
+winning_party_count = winning_party_count |>
+  select(-c(n, party)) |>
+  group_by(year, state) |>
+  summarise(across(c(rep_districts, dem_districts), sum)) |>
+  mutate(tot_districts = rep_districts + dem_districts,
+         frac_rep = rep_districts/tot_districts)
+  
+#join geographical and winning_party_count data to make map
+winning_party_geom = full_join(
+  winning_party_count,
+  usa,
+  by = c("state" = "ID")
+)
+
+#make joined dataframe into an sf object
+winning_party_geom = st_as_sf(winning_party_geom)
+
+#pivot winning_party_geom longer to avoid duplicate coordinates
+# winning_party_geom = pivot_wider(
+#   winning_party_geom,
+#   names_from = "year",
+#   values_from = c("frac_rep", "rep_districts", "dem_districts", "tot_districts")
+# )
+  
+```
+
+\pagebreak
+
+```{r spatial-EDA, fig.height=11, fig.width = 8.5, message = F, echo = F}
+winning_party_geom |>
+  filter(is.na(year) == FALSE) |>
+  ggplot() +
+  geom_sf(color = "#2b2b2b", fill = "white", size = .125) +
+  coord_sf(
+    crs = st_crs("+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 +a=6370997 
+                 +b=6370997 +units=m +no_defs"), 
+    datum = NA) +
+  geom_point(
+    stat = "sf_coordinates",
+    aes(geometry = geom, size = tot_districts, color = frac_rep)) +
+  scale_color_gradient(low = "blue", high = "red") +
+  facet_wrap(~year, ncol = 3) +
+  theme_void() +
+  labs(
+    title = "",
+    size = "Total Districts",
+    color = "Fraction of \n Republican Districts") +
+  theme(plot.title = element_text(hjust = .5),
+        legend.key.size = unit(.5, 'cm'),
+        text = element_text(size = 6))
 ```
 

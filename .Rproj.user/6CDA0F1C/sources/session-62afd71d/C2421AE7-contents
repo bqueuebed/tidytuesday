@@ -1,0 +1,408 @@
+---
+title: "Predicting the Price of Austin Airbnbs"
+author: "Linearity Legends - Barron Brothers, Jack Steel, Mert Bildirici, Kethan Poduri"
+date: "11/07/2023"
+format: pdf
+execute: 
+  warning: false
+  message: false
+  echo: false
+editor: visual
+---
+
+```{r}
+#| label: load packages and data
+library(tidyverse)
+library(tidymodels)
+library(knitr)
+library(patchwork)
+library(sf)
+# add other packages as needed
+
+listings <- read.csv('data/listings.csv')
+```
+
+```{r mutate-data}
+# Create Stars Column
+listings$stars <- as.numeric(gsub(".*★(\\d+\\.\\d+).*", "\\1", listings$name))
+
+# Filter for Austin, Texas
+austin_listings <- listings |>
+  filter(str_detect(as.character(name), "Austin")) 
+
+# Remove Hotels 
+austin_listings <- austin_listings |>
+  filter(str_detect(as.character(room_type), "Hotel room", negate=TRUE))
+```
+
+::: callout-important
+##### Before you submit, make sure your code chunks are turned off with `echo: false` and there are no warnings or messages with `warning: false` and `message: false` in the YAML.
+:::
+
+## Introduction and Data
+
+[Airbnbs](https://www.nerdwallet.com/article/travel/are-airbnbs-more-cost-effective-than-hotels) have historically been known as a cheaper (and better) alternative to hotels. As the Airbnb market has evolved, Airbnbs have typically been getting more expensive for solo travelers and couples. If many people rent an Airbnb for long periods of time, though, it could be very economical.
+
+When people are travelling, it is important for them to get the best price and best experience possible. These two factors can be difficult to balance, though. As an Airbnb is more highly rated, the owner could decide to raise the price due to higher demand. People can also rate on multiple factors, such as the availability, the amount of the room rented, and/or the location.
+
+The research question we will focus on is as follows: For Airbnbs in Austin, TX, **What is the relationship between price and customer ratings with respect to availability, room type, and the number of reviews a listing has?**
+
+We predict that as availability decreases, the number of reviews a listing has increases, and as room type becomes larger and more private, and customer ratings become more positive, price will increase.
+
+#### Data
+
+The source of the dataset is [here](https://www.kaggle.com/datasets/deeplearner09/airbnb-listings). While the data itself is displayed on Kaggle, the data is derived from a clear external source: [InsideAirbnb](http://insideairbnb.com/austin). Our team has cross-validated the data to make sure that it is accurate. The data set itself is updated frequently, with the last update taking place on 07 Oct. 2023. The data have been collected since 2020, but prior dates are included.
+
+There are 14,681 observations in the dataset, 4,381 of which have `number_of_reviews` $\geq 30$. Generally, many of the useful variables have to do with the ratings of an observation (one Airbnb), the location of the observation, or describing the observation itself (i.e. `price`, `name`, ... etc.) The data columns can be described as follows:
+
+-   `id`: The unique identifier for each Airbnb
+-   `name` contains multiple variables, listed in order:
+    -   Type of home rented
+    -   Location (We are only using Austin)
+    -   Rating (i.e. "★4.84")
+    -   No. of bedrooms
+    -   No. of beds
+    -   No. of baths
+-   `host_id`: The unique identifier for each host
+-   `neighbourhood`: The ZIP code that the Airbnb is in
+-   `room_type`: What was rented (i.e. "Entire home/apt", "Private room", ... etc.)
+-   `price`: The daily price in local currency. Since we are only using Airbnbs in Austin, TX, this value will be in \$.
+-   `minimum_nights`: The minimum amount of nights that a person can rent out the Airbnb.
+-   `number_of_reviews`: The number of reviews for the Airbnb.
+-   `reviews_per_month`: The number of reviews per month for an Airbnb.
+
+### EDA
+
+```{r exp-data1}
+p1 = listings |>
+  filter(price < 11000) |>
+  ggplot(aes(x = stars, y = price)) +
+  geom_point(color = "seagreen", size = .5, alpha = .2) +
+  theme(text = element_text(size = 7)) +
+  labs(x = "Number of Stars", 
+       y = "Price", 
+       title = "Price vs. Number of Stars a Listing Has")
+```
+
+```{r expdata2, warning = F, echo = F}
+p2 = listings |>
+  ggplot(aes(x = price)) +
+  geom_histogram(fill = "orange", color = "black", binwidth = 100) +
+  # Filter out outliers in price for a more clear display of the range. 
+  # NOTE: For display only!!!
+  xlim(0, 2000) +
+  theme(text = element_text(size = 7)) +
+  labs(x = "Price for One Night", 
+       y = "Number of Listings", 
+       title = "Price Distribution Among All Listings")
+```
+
+```{r expdata3, message = F, warning = F, echo = F}
+p3 = listings |>
+  ggplot(aes(x = minimum_nights)) +
+  geom_histogram(fill = "orange", color = "black") +
+  # Filter out outliers in price for a more clear display of the range. 
+  # NOTE: For display only!!!
+  xlim(0, 45) +
+  theme(text = element_text(size = 6)) +
+  labs(x = "Minimum Nights", 
+       y = "Number of Listings", 
+       title = "Distribution of Minimum Nights Among All Listings")
+```
+
+```{r expdata4, warning = F, message = F, echo = F}
+p4 = listings |>
+  filter(minimum_nights < 45) |>
+  ggplot(aes(x = minimum_nights)) +
+  geom_histogram(fill = "orange", color = "black") +
+  theme(text = element_text(size = 6)) +
+  labs(x = "Minimum Nights", 
+       y = "Number of Listings", 
+       title = "Distribution of Minimum Nights Among All Listings")
+```
+
+```{r expdata5, echo = F}
+room_type_counts <- as.data.frame(table(listings$room_type))
+
+p5 = room_type_counts |>
+  ggplot(aes(x = Var1, y = Freq)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "Room Type Distribution", x = "Room Type", y = "Count") +
+  theme_minimal() +
+  theme(text = element_text(size = 6))
+```
+
+```{r expdata6, warning = F, echo = F}
+p6 = listings |>
+  filter(room_type != "Hotel room") |>
+  ggplot(aes(x = minimum_nights, y = price, color = room_type)) +
+  geom_point(alpha = .5, size = .75) +
+  facet_wrap(~room_type) +
+  # Cutting out outliers for display, same reasoning as before
+  xlim(0, 45) +
+  ylim(0, 2000) +
+  labs(title = "Price vs. Minimum Nights", x = "Minimum Nights", y = "Price") +
+  scale_color_discrete(name = "Room Type") +
+  theme_minimal() +
+  theme(text = element_text(size = 7.5), legend.key.size = unit(.75, 'cm'))
+```
+
+```{r expdata7, warning = F, echo = F}
+p7 = listings |>
+  filter(minimum_nights < 45) |>
+  ggplot(aes(x = minimum_nights, y = price, color = room_type)) +
+  geom_point(alpha = .5, size = .5) +
+  facet_wrap(~room_type) +
+  ylim(0,2000) +
+  labs(title = "Price vs. Minimum Nights", x = "Minimum Nights", y = "Price") +
+  scale_color_discrete(name = "Room Type") +
+  theme_minimal() +
+  theme(text = element_text(size = 6), legend.key.size = unit(.5, 'cm'))
+```
+
+```{r expdata8, warning = F, echo = F}
+p8 = listings |>
+  filter(number_of_reviews > 0) |>
+  ggplot(aes(x = number_of_reviews, y = price, color = reviews_per_month)) +
+  geom_point(size = .75) +
+  ylim(0,2000) +
+  labs(title = "Price vs. Number of Reviews", x = "Number of Reviews", 
+       y = "Price", color = "Reviews per Month") +
+  theme_minimal() +
+  theme(text = element_text(size = 7.5), legend.key.size = unit(.4, 'cm'))
+```
+
+```{r patchwork-plots, warning = F}
+(p1 + p2) / (p4 + p5)
+p8 / p6
+```
+
+```{r prepare-for-mapping, warning = F}
+# Extract geometry of Austin Zip Codes from Austin Public Records
+austin_geom <- 
+  st_read("data/Boundaries__Zip_Code_Tabulation_Areas__2017_20231111.csv", 
+          quiet = TRUE)
+
+# Turn coordinates into geom class
+austin_geom <- sf::st_as_sf(austin_geom, wkt = "the_geom")
+
+# Make sure `neighborhood` matches class of `Zip.Code`.
+austin_listings <- austin_listings |>
+  mutate(neighbourhood = as.character(neighbourhood))
+
+# Join datasets, including null zip codes for plotting
+austin_geom_listings <- full_join(
+  x = austin_geom,
+  y = austin_listings,
+  by = c("Zip.Code" = "neighbourhood")
+)
+
+# Mutate `the_geom` to geometry type so map renders
+austin_geom_listings <- sf::st_as_sf(austin_geom_listings, wkt = "the_geom")
+
+# Create count and correct join error with `mutate()`
+austin_geom_count <- austin_geom_listings |>
+  group_by(Zip.Code) |>
+  count() |>
+  mutate(n = if_else(condition = n == 1, 0, n))
+
+# Turn coordinates into geom class
+austin_geom_count <- sf::st_as_sf(austin_geom_count, wkt = "the_geom")
+
+# Do the same with price and stars.
+austin_geom_price <- austin_geom_listings |>
+  group_by(Zip.Code) |>
+  filter(is.na(price) == FALSE,
+         Zip.Code != "78712") |>
+  mutate(price = as.numeric(price)) |>
+  summarise_at(vars(price), list(price = mean))
+
+austin_geom_stars <- austin_geom_listings |>
+  group_by(Zip.Code) |>
+  filter(is.na(stars) == FALSE,
+         Zip.Code != "78712") |>
+  mutate(price = as.numeric(stars)) |>
+  summarise_at(vars(stars), list(stars = mean))
+```
+
+```{r observation-geom-distribution, out.height=250, fig.align='center'}
+austin_geom_count |>
+  mutate(n = if_else(condition = n == 0, NA, n)) |>
+  ggplot(aes(geometry = the_geom, fill = n)) +
+  geom_sf() +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    caption = "ZIP Codes without observations are shown in grey.
+    These ZIP codes are labeled for reference.",
+    title = "Geometric Distribution of AirBnb Observations",
+    fill = "No. of Observations"
+  ) +
+  annotate("text", x = -97.85, y = 30.08, label = "78610", size = 2) +
+  annotate("text", x = -98, y = 30, label = "78652", size = 2) +
+  annotate("segment", x = -98, y = 30.02, xend = -97.9, yend = 30.14, linewidth = .4) +
+  annotate("text", x = -97.61, y = 30.16, label = "78617", size = 2) +
+  annotate("text", x = -97.5, y = 30.07, label = "78612", size = 2) +
+  annotate("text", x = -97.55, y = 30.37, label = "78653", size = 2) +
+  annotate("text", x = -97.6, y = 30.46, label = "78660", size = 2) +
+  annotate("text", x = -97.55, y = 30.6, label = "78664", size = 2) +
+  annotate("segment", x = -97.55, y = 30.58, xend = -97.68, yend = 30.51, linewidth = .4) +
+  annotate("text", x = -97.7, y = 30.62, label = "78681", size = 2) +
+  annotate("segment", x = -97.7, y = 30.6, xend = -97.71, yend = 30.53, linewidth = .4) +
+  annotate("text", x = -98, y = 30.45, label = "78613", size = 2) +
+  annotate("segment", x = -97.95, y = 30.45, xend = -97.82, yend = 30.5, linewidth = .4) +
+  annotate("text", x = -97.91, y = 30.56, label = "78641", size = 2) 
+```
+
+```{r price-geom-distribution}
+geom1 <- austin_geom_price |>
+  ggplot(aes(geometry = the_geom, fill = price)) +
+  geom_sf() +
+  labs(
+    x = "Latitude",
+    y = "Longitude",
+    fill = "Average Price/Night",
+    title = "Distribution of Average Price per Night \n for Austin Airbnbs"
+  ) +
+  theme(text = element_text(size = 6), legend.key.size = unit(.35, 'cm'),
+        plot.margin = margin(-2, 0, -2, 0, unit = "cm"))
+```
+
+::: callout-note
+Along with the labeled ZIP codes in the observation map above, the ZIP code 78712 is not included in the distributions of `price` and `stars` below since there are only 2 observations in that ZIP code.
+:::
+
+```{r stars-geom-distribution}
+geom2 <- austin_geom_stars |>
+  ggplot(aes(geometry = the_geom, fill = stars)) +
+  geom_sf() +
+  labs(
+    x = "Latitude",
+    y = "Longitude",
+    fill = "Average Rating",
+    caption = "Customer ratings were from a 1-5 scale.",
+    title = "Distribution of Average Ratings \n for Austin Airbnbs"
+  ) +
+  theme(text = element_text(size = 6), legend.key.size = unit(.35, 'cm'),
+        plot.margin = margin(-2, 0, -2, 0, unit = "cm"))
+```
+
+```{r patchwork2}
+geom1 + geom2
+```
+
+## Methodology
+
+We are trying to find the best estimate of the price depending on the neighbourhood, room type, reviews per month, available days per year, the number of stars customers gave, how many listings the host has, minimum nights you could stay at the listing, number of reviews, number of reviews in the last twelve months. We are going for a linear model because we are trying to find a numerical value (`price`), not a binary outcome. We think different room types would attract people from different backgrounds and might be in different price ranges. Also, the neighborhood that the listing is in, whether it is a bad or a good area, would affect the price, Available days per year might show how busy the listing is, and if there is enough demand, we would expect increased prices. The number of listings the host has could be a sign of how well of a host they are, and they might charge higher because of this. The number of reviews would show how popular the listing is, and it is safe to assume that the more popular the listing is, the more inclined the host will be to increase the price. Number of stars is also crucial since the more stars a listing has, the more demand it will have, and thus people would be willing to pay more for it. We think the minimum number of nights you could stay could be correlated to the availability as there are some listings with long stays. This limits the availability of the listings, and there might be an interaction effect regarding that. Also, the number of reviews in the last twelve months is correlated to the total number of reviews since as one increases, the other increases as well.
+
+Even without the neighborhoods in the Austin metro area that have no observations, we will still have 42 neighborhoods, which puts us in danger of overpredicting. To solve this, we manually faceted the ZIP codes based on average regional income: High-income (\$106,001+), Upper-midddle-income (\$80,001-106,000), Lower-middle-income (\$60,001-80,000), and Low-income (\$0-60,000) based on [Austin's geographic socioeconomic data](https://simplemaps.com/city/austin/zips/income-household-median). This was achieved using `step_mutate()`. Subsequently, we removed `neighbourhood` with `step_rm()`.
+
+For the project, we decided to focus on the listings in Austin. This has two main reasons: out of 14861 listings, 14650 of them are in Austin, which means we don't have enough significant observations from other locations. The other problem is all the other observations have prices in their local currencies. While this might be solved by just converting the currencies to dollars, it is really hard to find the specific ratio of the currencies on the date the listing was posted. For example, Turkish lira constantly goes up and down against the dollar, which makes it difficult to convert the price on those listings to dollars.
+
+For this model, we assume that the incomes in the faceted ZIP codes are relatively consistent; i.e. within a ZIP code that's classified as lower-income, there isn't a higher-income neighborhood.
+
+## Results
+
+```{r}
+# Initial Split
+set.seed(123)
+austin_listings_split <- initial_split(austin_listings)
+
+# Training Data
+austin_train <- training(austin_listings_split)
+
+# Testing Data 
+austin_test <- testing(austin_listings_split)
+```
+
+```{r}
+# Predict Price from Month it was Last Reviewed, Customer Rating, Neighbourhood, Room Type, Number of Reviews, Reviews per Month, Calculate_Host_Listings, Availibility 365
+
+# Austin Listings Initialize Recipe 
+aus_listings_rec <- recipe(
+  price ~ neighbourhood + room_type + reviews_per_month + availability_365 + stars + calculated_host_listings_count + minimum_nights + number_of_reviews + number_of_reviews_ltm,
+  data = austin_train
+)
+
+# Create Recipe
+aus_listings_rec <- aus_listings_rec |>
+  step_mutate(income_level = case_when(
+    neighbourhood == c(78738, 78737, 78732, 78733, 78739, 78746, 78730, 78701, 78734, 78717, 78703) ~ "High Income",
+    neighbourhood == c(78749, 78750, 78735, 78731, 78736, 78759, 78747, 78756, 78727, 78729, 78704) ~ "Upper Mid Income", 
+    neighbourhood == c(78726, 78748, 78757, 78754, 78719, 78751, 78745, 78702, 78722, 78758, 78728) ~ "Lower Mid Income", 
+    neighbourhood == c(78725, 78723, 78744, 78705, 78741, 78721, 78752, 78724, 78753, 78712, 78742) ~ "Low Income"
+  ),
+  income_level = factor(income_level, levels = c("High Income", "Upper Mid Income", "Lower Mid Income", "Low Income"))) |>
+  step_rm(neighbourhood) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_predictors()) 
+```
+
+```{r}
+# Prep and Bake
+aus_listings_rec |>
+  prep() |>
+  bake(austin_train)
+  # glimpse()
+
+# Create Model
+austin_spec <- linear_reg() |>
+  set_engine("lm")
+
+# Create Workflow
+austin_wflow <- workflow() |>
+  add_model(austin_spec) |>
+  add_recipe(aus_listings_rec)
+
+# Fit Model
+austin_fit <- austin_wflow |>
+  fit(data = austin_train) 
+
+austin_fit |>
+  tidy() |>
+  kable(digits=3)
+```
+
+$$
+\begin{aligned}
+& \widehat{price} = -274.379 - 19.031 \times \text{reviews per month} + 0.383 \times \text{yearly availability} + 127.021 \times \text{stars}
+\\
+& -0.809 \times \text{number of listings host has} -0.814 \times \text{minimum nights} + 0.017 \times \text{number of reviews}
+\\
+& -0.652 \times \text{number of reviews} -162.732 \times \text{Income Level::Low Income} \ 
+\\
+& -119.054 \times \text{Income Level::Lower Mid Income} -112.125 \times \text{Income Level::Upper Mid Income} 
+\\
+& -159.237 \times \text{Room Type::Private Room} - \ 229.991 \times \text{Room Type::Shared Room} 
+\end{aligned}
+$$
+
+Our first multi-linear model is shown above. It includes reviews per month, availability out of 365 days, number of stars, calculated host listings, minimum nights, number of reviews, number of reviews in the last twelve months, income level for each zipcode income bracket, and room type as predictor variables to estimate the approximate Airbnb price.
+
+Reviews per month appears to be a relatively significant variable as the p-value, 0.014, is less than 0.05. The model states that when all other variables are held constant, an additional review each month is expected to decrease the predicted Airbnb price by approximately \$19.03 per night.
+
+Availability out of 365 days is also a significant variable, as the p-value is approximately 0, which is less than 0.05. The model states that each additional day the rental is listed out of 365 days, the predicted Airbnb price is expected to increase by approximately \$0.38 per night.
+
+Stars is also a statistically significant variable, as the p-value of 0.001 is less than 0.05. The model states that with each additional star the Airbnb rental earns, the predicted Airbnb price is expected to increase by approximately \$127.02 per night.
+
+The calculated host listings has a p-value of approximately 0.103, which is not necessarily statistically significant. Therefore, we may choose to remove this variable when creating an additional model. Despite this, the model states that with each additional listing the host of Airbnb rental has, the predicted Airbnb price is expected to decrease by approximately \$0.81.
+
+Minimum nights is also not a statistically significant variable, as the p-value is approximately 0.084 which is greater than 0.05. That being said, we may choose to also remove this variable when creating our final model. However, the current model states that with each additional night the Airbnb rental's minimum night policy increases, the predicted Airbnb price is expected to decrease by approximately \$0.81 per night.
+
+The number of reviews is extremely not statistically significant, as the p-value of 0.903 far exceeds 0.05. Therefore, we will likely choose to remove this variable before creating the final model. On the other hand, the current model predicts that with each additional review in the number of reviews, the predicted Airbnb price is expected to increase by approximately \$0.02.
+
+Similarly, the number of reviews in the last twelve months is also not statistically significant (p-value of 0.441) and thus will not be included when creating our final model. The current model states that as the number of reviews in the last twelve months increases by one review, the predicted Airbnb price is expected to decrease by approximately \$0.65.
+
+The low income level variable has a p-value of approximately 0, thereby determining this variable to be statistically significant. The model states that when the Airbnb is in a low income neighbourhood in Austin, the predicted Airbnb price is expected to decrease by appxoimately \$162.73 per night (in comparison to a high income neighbourhood).
+
+The lower mid income level also has a p-value of approximately 0, which is less than 0.05 and thus this variable is statisticall significant. The model states that when the Airbnb is in a lower-mid income neighbourhood in Austin, the predicted Airbnb price is expected to decrease by approximately \$119.05 per night (in comparison to a high income neighbourhood).
+
+Compared to the baseline of a high-income area, renting an Airbnb in a lower-middle income area is expected to be \$119.05 cheaper, on average. Since $p \approx 0$, this predictor is statistically significant.
+
+A shared room is expected to be \$159.24 cheaper than the baseline---renting the entire home or apartment---on average. With $p \approx 0$, this value is statistically significant.
+
+A shared room is expected to be \$230 cheaper than the baseline---renting the entire home or apartment---on average. However, with a p-value of .13, this estimate is not statistically significant, possibly due to the relatively low number of shared rooms available.
+
+### Diagnostics
+
+We noticed that, across the dummy variables of the faceted income levels, that lower income levels have an increasingly lower price, on average. This might be because Airbnbs in lower-income neighborhoods might have less amenities and might be more susceptible to undesirable factors, such as crime. Unsurprisingly, the rating of an Airbnb is very influential in the price, but the majority of the dataset has ratings between 4.5 and 5 stars, so, in practice, this might not be very influential. What was relatively surprising was the minimum nights variable. This predictor was not statistically significant, but was fairly close. However, the coefficient is still negative; i.e. a minimum night requirement of 30 days would only decrease the nightly price by \$23.61, which would add up to \$708 saved for the total of 30 days. This is consistent with our hypothesis of Airbnb owners lowering the price for longer stays so they have consistent business and have to file less paperwork.

@@ -1,0 +1,10 @@
+"0","library(tidytuesdayR)"
+"0",""
+"0","tues_data = tt_load(2023, week = 45)"
+"1","
+"
+"1","	Downloading file 1 of 1: `house.csv`
+"
+"1","
+"
+"0","house = tues_data$house"

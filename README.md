@@ -2,7 +2,7 @@
 
 ## Visualization
 
-![Page 1](./6.11.2023/Page1.png) ![Page 2](~/tidytuesday/6.11.2023/Page2.png) ![Page 3](~/tidytuesday/6.11.2023/Page3.png)
+![Page 1](./6.11.2023/Page1.png) ![Page 2](./6.11.2023/Page2.png) ![Page 3](./6.11.2023/Page3.png)
 
 
 *Note: Alaska and Hawaii are not included in this plot due to mapping difficulties.*

@@ -4,6 +4,7 @@ author: "Barron Brothers"
 date: "8 Nov 2023"
 format: pdf
 editor: source
+echo: FALSE
 ---
 
 ## Setup
@@ -24,7 +25,7 @@ tues_data = tt_load(2023, week = 45)
 house = tues_data$house
 ```
 
-## EDA
+## Visualization
 
 ```{r who-won?}
 #create party factors and determine the fraction of votes each candidate got

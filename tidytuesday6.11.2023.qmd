@@ -73,38 +73,29 @@ winning_party = winning_party |>
 
 #filter out alaska, hawaii, and dc; filter out `party = "Other"`.
 winning_party = winning_party |>
-  filter(state != "alaska", state != "hawaii", state != "district of columbia",
-         party != "OTHER", )
+  filter(state != "alaska", state != "hawaii", state != "district of columbia")
 
 #count winners by state, year, and party
 winning_party_count = winning_party |>
   group_by(year, state, party) |>
   count()
 
-#count districts by state and divide by number of years to obtain average
-
-district_count = winning_party |>
-  group_by(state) |>
-  count()
-
-district_count = district_count |>
-  mutate(n = n/24)
-
 #mutate to show % of districts republcians won
 winning_party_count = winning_party_count |>
   mutate(rep_districts = if_else(party == "REPUBLICAN", n, 0),
-         dem_districts = if_else(party == "DEMOCRAT", n, 0)) |>
+         dem_districts = if_else(party == "DEMOCRAT", n, 0),
+         other_districts = if_else(party == "OTHER", n, 0)) |>
   ungroup()
 
 winning_party_count = winning_party_count |>
   select(-c(n, party)) |>
   group_by(year, state) |>
-  summarise(across(c(rep_districts, dem_districts), sum)) |>
+  summarise(across(c(rep_districts, dem_districts, other_districts), sum)) |>
   mutate(tot_districts = rep_districts + dem_districts,
          frac_rep = rep_districts/tot_districts)
   
 #join geographical and winning_party_count data to make map
-winning_party_geom = full_join(
+winning_party_geom = left_join(
   winning_party_count,
   usa,
   by = c("state" = "ID")
@@ -112,21 +103,14 @@ winning_party_geom = full_join(
 
 #make joined dataframe into an sf object
 winning_party_geom = st_as_sf(winning_party_geom)
-
-#pivot winning_party_geom longer to avoid duplicate coordinates
-# winning_party_geom = pivot_wider(
-#   winning_party_geom,
-#   names_from = "year",
-#   values_from = c("frac_rep", "rep_districts", "dem_districts", "tot_districts")
-# )
-  
 ```
 
 \pagebreak
 
-```{r spatial-EDA, fig.height=11, fig.width = 8.5, message = F, echo = F}
+```{r spatial-EDA, fig.height=11, fig.width = 8.5, message = T, echo = F, warning = F}
 winning_party_geom |>
-  filter(is.na(year) == FALSE) |>
+  filter(is.na(year) == FALSE, year <= 1990) |>
+  mutate(other_districts = if_else(other_districts == 0, NA, other_districts)) |>
   ggplot() +
   geom_sf(color = "#2b2b2b", fill = "white", size = .125) +
   coord_sf(
@@ -136,15 +120,69 @@ winning_party_geom |>
   geom_point(
     stat = "sf_coordinates",
     aes(geometry = geom, size = tot_districts, color = frac_rep)) +
+  geom_sf_text(
+    stat = "sf_coordinates",
+    aes(label = other_districts), size = 3, color = "darkgreen") +
   scale_color_gradient(low = "blue", high = "red") +
-  facet_wrap(~year, ncol = 3) +
+  scale_size(range = c(0,3)) +
+  facet_wrap(~year, ncol = 2) +
   theme_void() +
   labs(
-    title = "",
+    title = "Distribution of US House Districts Won by Geography",
     size = "Total Districts",
     color = "Fraction of \n Republican Districts") +
   theme(plot.title = element_text(hjust = .5),
-        legend.key.size = unit(.5, 'cm'),
-        text = element_text(size = 6))
+        legend.key.size = unit(1, 'cm'))
+
+winning_party_geom |>
+  filter(is.na(year) == FALSE, year > 1990, year <= 2006) |>
+  mutate(other_districts = if_else(other_districts == 0, NA, other_districts)) |>
+  ggplot() +
+  geom_sf(color = "#2b2b2b", fill = "white", size = .125) +
+  coord_sf(
+    crs = st_crs("+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 +a=6370997 
+                 +b=6370997 +units=m +no_defs"), 
+    datum = NA) +
+  geom_point(
+    stat = "sf_coordinates",
+    aes(geometry = geom, size = tot_districts, color = frac_rep)) +
+  geom_sf_text(
+    stat = "sf_coordinates",
+    aes(label = other_districts), size = 3, color = "darkgreen") +
+  scale_color_gradient(low = "blue", high = "red") +
+  scale_size(range = c(0,3)) +
+  facet_wrap(~year, ncol = 2) +
+  theme_void() +
+  labs(
+    size = "Total Districts",
+    color = "Fraction of \n Republican Districts") +
+  theme(plot.title = element_text(hjust = .5),
+        legend.key.size = unit(1, 'cm'))
+
+winning_party_geom |>
+  filter(is.na(year) == FALSE, year >= 2008) |>
+  mutate(other_districts = if_else(other_districts == 0, NA, other_districts)) |>
+  ggplot() +
+  geom_sf(color = "#2b2b2b", fill = "white", size = .125) +
+  coord_sf(
+    crs = st_crs("+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 +a=6370997 
+                 +b=6370997 +units=m +no_defs"), 
+    datum = NA) +
+  geom_point(
+    stat = "sf_coordinates",
+    aes(geometry = geom, size = tot_districts, color = frac_rep)) +
+  geom_sf_text(
+    stat = "sf_coordinates",
+    aes(label = other_districts), size = 3, color = "darkgreen") +
+  scale_color_gradient(low = "blue", high = "red") +
+  scale_size_area(max_size = 3) +
+  facet_wrap(~year, ncol = 2) +
+  theme_void() +
+  labs(
+    size = "Total Districts",
+    color = "Fraction of \n Republican Districts",
+    caption = "Number listed in state represents district representatives with independent affiliation.") +
+  theme(plot.title = element_text(hjust = .5),
+        legend.key.size = unit(1, 'cm'))
 ```
 
